@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <complex>
+#include <vector>
+#include <memory.h>
 
 using namespace std;
 
@@ -30,12 +32,22 @@ struct {
   int findex;
   int filesperdir;
   int bigendian;
+
+  // derived
+  int nb[5];
+  int blocks;
 } args;
 
 int vol4d, vol5d;
-int f_size, neig;
+int f_size, neig, f_size_block;
 
 float* raw_in;
+
+vector< vector<float> > block_data; 
+
+vector< vector<float> > block_data_ortho; 
+
+//float* ord_in; // in non-bfm ordering:  co fastest, then x,y,z,t,s
 
 void fix_float_endian(float* dest, int nfloats) {
   int n_endian_test = 1;
@@ -58,17 +70,121 @@ void fix_float_endian(float* dest, int nfloats) {
 
 }
 
-complex<float> sp_single(float* a, float* b, int f_size) {
-  complex<float>* ca = (complex<float>*)a;
-  complex<float>* cb = (complex<float>*)b;
+int get_bfm_index( int* pos, int co ) {
+
+  int ls = args.s[4];
+  int vol_4d_oo = vol4d / 2;
+  int vol_5d = vol_4d_oo * ls;
+  
+  int NtHalf = args.s[3] / 2;
+  int simd_coor = pos[3] / NtHalf;
+  int regu_coor = (pos[0] + args.s[0] * (pos[1] + args.s[1] * ( pos[2] + args.s[2] * (pos[3] % NtHalf) ) )) / 2;
+  int regu_vol  = vol_4d_oo / 2;
+
+  return
+    + regu_coor * ls * 48
+    + pos[4] * 48
+    + co * 4  
+    + simd_coor * 2;
+}
+
+void index_to_pos(int i, int* pos, int* latt) {
+  int d;
+  for (d=0;d<5;d++) {
+    pos[d] = i % latt[d];
+    i /= latt[d];
+  }
+}
+
+int pos_to_index(int* pos, int* latt) {
+  return pos[0] + latt[0]*( pos[1] + latt[1]*( pos[2] + latt[2]*( pos[3] + latt[3]*pos[4] ) ) );
+}
+
+
+void pos_to_blocked_pos(int* pos, int* pos_in_block, int* block_coor) {
+  int d;
+  for (d=0;d<5;d++) {
+    block_coor[d] = pos[d] / args.b[d];
+    pos_in_block[d] = pos[d] - block_coor[d] * args.b[d];
+  }
+}
+
+template<class T>
+void caxpy_single(T* res, complex<T> ca, T* x, T* y, int f_size) {
+  complex<T>* cx = (complex<T>*)x;
+  complex<T>* cy = (complex<T>*)y;
+  complex<T>* cres = (complex<T>*)res;
+  int c_size = f_size / 2;
+
+  for (int i=0;i<c_size;i++)
+    cres[i] = ca*cx[i] + cy[i];
+}    
+
+template<class T>
+void caxpy(T* res, complex<T> ca, T* x, T* y, int f_size) {
+  complex<T>* cx = (complex<T>*)x;
+  complex<T>* cy = (complex<T>*)y;
+  complex<T>* cres = (complex<T>*)res;
+  int c_size = f_size / 2;
+
+#pragma omp parallel for
+  for (int i=0;i<c_size;i++)
+    cres[i] = ca*cx[i] + cy[i];
+}    
+
+template<class T>
+complex<T> sp_single(T* a, T* b, int f_size) {
+  complex<T>* ca = (complex<T>*)a;
+  complex<T>* cb = (complex<T>*)b;
   int c_size = f_size / 2;
 
   int i;
-  complex<float> ret = 0.0;
+  complex<T> ret = 0.0;
   for (i=0;i<c_size;i++)
     ret += conj(ca[i]) * cb[i];
 
   return ret;
+}
+
+template<class T>
+complex<T> sp(T* a, T* b, int f_size) {
+  complex<T>* ca = (complex<T>*)a;
+  complex<T>* cb = (complex<T>*)b;
+  int c_size = f_size / 2;
+
+  complex<T> res = 0.0;
+#pragma omp parallel shared(res)
+  {
+    complex<T> resl = 0.0;
+#pragma omp for
+    for (int i=0;i<c_size;i++)
+      resl += conj(ca[i]) * cb[i];
+
+#pragma omp critical
+    {
+      res += resl;
+    }
+  }
+  return res;
+}
+
+double norm_of_evec(vector< vector<float> >& v, int j) {
+  double gg = 0.0;
+#pragma omp parallel shared(gg)
+  {
+    double ggl = 0.0;
+#pragma omp for
+    for (int nb=0;nb<args.blocks;nb++) {
+      float* res = &v[nb][ (int64_t)f_size_block * j ];
+      ggl += sp_single(res,res,f_size_block).real();
+    }
+
+#pragma omp critical
+    {
+      gg += ggl;
+    }
+  }
+  return gg;
 }
 
 int main(int argc, char* argv[]) {
@@ -113,6 +229,25 @@ int main(int argc, char* argv[]) {
     f_size = vol5d / 2 * 24;
 
     printf("f_size = %d\n",f_size);
+
+    printf("\n");
+
+    // sanity check
+    args.blocks = 1;
+    for (i=0;i<5;i++) {
+      if (args.s[i] % args.b[i]) {
+	fprintf(stderr,"Invalid blocking in dimension %d\n",i);
+	return 72;
+      }
+
+      args.nb[i] = args.s[i] / args.b[i];
+      args.blocks *= args.nb[i];
+    }
+
+    f_size_block = f_size / args.blocks;
+
+    printf("number of blocks = %d\n",args.blocks);
+    printf("f_size_block = %d\n",f_size_block);
 
     printf("\n");
   }
@@ -208,10 +343,148 @@ int main(int argc, char* argv[]) {
 
   }
 
-  // Have loaded uncompressed eigenvector slot and verified it
-  // Next: do the blocking and get coefficients
-  
+  //
+  // Status: 
+  //  loaded uncompressed eigenvector slot and verified it
+  //
 
+  {
+
+    // create block memory
+    block_data.resize(args.blocks);
+    for (int i=0;i<args.blocks;i++)
+      block_data[i].resize(f_size_block * neig);    
+
+    double t0 = dclock();
+    
+    //
+#pragma omp parallel 
+    {
+      for (int nev=0;nev<neig;nev++) {
+	float* raw_in_ev = &raw_in[ (int64_t)f_size * nev ];
+	
+#pragma omp for
+	for (int idx=0;idx<vol4d;idx++) {
+	  int pos[5], pos_in_block[5], block_coor[5];
+	  index_to_pos(idx,pos,args.s);
+	  
+	  int parity = (pos[0] + pos[1] + pos[2] + pos[3]) % 2;
+	  if (parity == 1) {
+	    
+	    for (pos[4]=0;pos[4]<args.s[4];pos[4]++) {
+	      pos_to_blocked_pos(pos,pos_in_block,block_coor);
+	      
+	      int bid = pos_to_index(block_coor, args.nb);
+	      int ii = pos_to_index(pos_in_block, args.b) / 2;
+
+	      float* dst = &block_data[bid][ ii*24 + (int64_t)f_size_block * nev ];
+	      
+	      int co;
+	      for (co=0;co<12;co++)
+		memcpy(&dst[2*co],&raw_in_ev[ get_bfm_index(pos,co) ],2*sizeof(float));
+	    }
+	  }
+	}
+      }
+    }
+
+    double t1 = dclock();
+
+    printf("Created block structure in %.2g seconds\n",t1-t0);
+
+    // simple test
+    {
+      int test_ev = neig - 1;
+      float* raw_in_ev = &raw_in[ (int64_t)f_size * test_ev ];
+      float nrm = sp(raw_in_ev,raw_in_ev,f_size).real();
+
+      int i;
+      double nrm_blocks = 0.0;
+      for (i=0;i<args.blocks;i++) {
+	float* in_ev = &block_data[i][ (int64_t)f_size_block * test_ev ];
+	nrm_blocks += sp(in_ev,in_ev,f_size_block).real();
+      }
+
+      printf("Difference of checksums after blocking: %g - %g = %g\n",nrm,nrm_blocks,nrm-nrm_blocks);
+
+      if (fabs(nrm - nrm_blocks) > 1e-5) {
+	fprintf(stderr,"Unexpected error in creating blocks\n");
+	return 91;
+      }
+    }
+  }
+
+  // Now do Gram-Schmidt
+  {
+    // create block memory
+    block_data_ortho.resize(args.blocks);
+    for (int i=0;i<args.blocks;i++)
+      block_data_ortho[i].resize(f_size_block * args.nkeep);    
+    
+    double t0 = dclock();
+
+    int nevmax = args.nkeep;
+
+#pragma omp parallel for
+    for (int nb=0;nb<args.blocks;nb++) {
+
+      for (int iev=0;iev<nevmax;iev++) {
+
+	float* orig = &block_data[nb][ (int64_t)f_size_block * iev ];
+	float* res = &block_data_ortho[nb][ (int64_t)f_size_block * iev ];
+
+	memcpy(res,orig,sizeof(float)*f_size_block);
+	
+	for (int jev=0;jev<iev;jev++) {
+	  
+	  float* ev_j = &block_data_ortho[nb][ (int64_t)f_size_block * jev ];
+	  
+	  // res = |i> - <j|i> |j>
+	  // <j|res>
+	  complex<float> nrm_j = sp_single(ev_j,ev_j,f_size_block);
+	  complex<float> res_j = sp_single(ev_j,res,f_size_block);
+	  
+	  caxpy_single(res,- res_j / nrm_j,ev_j,res,f_size_block);
+	}
+
+      }
+    }
+    
+    double t1 = dclock();
+
+    printf("Gram-Schmidt took %.2g seconds\n",t1-t0);
+
+  }
+
+
+  // Do a simple demonstration of convergence
+  {
+    for (int j=0;j<args.nkeep;j++) {
+
+      double norm_j = norm_of_evec(block_data,j);
+
+      for (int i=0;i<j+1;i++) {
+
+	if (i == j)
+	  printf("residuum %d = %g\n",i,norm_of_evec(block_data,j) / norm_j);
+
+#pragma omp parallel for
+	for (int nb=0;nb<args.blocks;nb++) {
+	  float* res = &block_data[nb][ (int64_t)f_size_block * j ];
+	  float* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
+	  
+	  complex<float> nrm_i = sp_single(ev_i,ev_i,f_size_block);
+	  complex<float> res_i = sp_single(ev_i,res,f_size_block);
+	  
+	  caxpy_single(res,- res_i / nrm_i,ev_i,res,f_size_block);
+        }
+	
+      }
+      
+    }
+
+  }
+  
 
 
   // Cleanup
