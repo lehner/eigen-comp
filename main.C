@@ -39,7 +39,7 @@ struct {
 } args;
 
 int vol4d, vol5d;
-int f_size, neig, f_size_block;
+int f_size, neig, f_size_block, f_size_coef_block;
 
 float* raw_in;
 
@@ -47,7 +47,9 @@ float* raw_in;
 
 vector< vector<OPT> > block_data; 
 
-vector< vector<OPT> > block_data_ortho; 
+vector< vector<OPT> > block_data_ortho;
+
+vector< vector<OPT> > block_coef;
 
 //float* ord_in; // in non-bfm ordering:  co fastest, then x,y,z,t,s
 
@@ -275,7 +277,11 @@ int main(int argc, char* argv[]) {
 
     neig = ( size / sizeof(float) / f_size );
 
+    f_size_coef_block = neig * 2 * args.nkeep;
+
     printf("Slot has %d eigenvectors stored\n",neig);
+
+    printf("Size of operating coefficient data in GB: %g\n", (double)f_size_coef_block * (double)args.blocks / 1024./1024./1024. * sizeof(OPT));
 
     fseeko(f,0,SEEK_SET);
 
@@ -463,13 +469,20 @@ int main(int argc, char* argv[]) {
   }
 
 
-  // Do a simple demonstration of convergence
+  // Get coefficients and create graphs
   {
-    for (int j=0;j<args.nkeep;j++) {
+    // create block memory
+    block_coef.resize(args.blocks);
+    for (int i=0;i<args.blocks;i++)
+      block_coef[i].resize(f_size_coef_block);    
+
+    double t0 = dclock();
+
+    for (int j=0;j<neig;j++) {
 
       double norm_j = norm_of_evec(block_data,j);
 
-      for (int i=0;i<j+1;i++) {
+      for (int i=0;i<args.nkeep;i++) {
 
 	if (i == j)
 	  printf("residuum %d = %g\n",i,norm_of_evec(block_data,j) / norm_j);
@@ -481,15 +494,28 @@ int main(int argc, char* argv[]) {
 	  
 	  complex<OPT> nrm_i = sp_single(ev_i,ev_i,f_size_block);
 	  complex<OPT> res_i = sp_single(ev_i,res,f_size_block);
-	  
-	  caxpy_single(res,- res_i / nrm_i,ev_i,res,f_size_block);
+
+	  complex<OPT> c = res_i / nrm_i;
+	  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+	  cptr[0] = c.real();
+	  cptr[1] = c.imag();
+
+	  caxpy_single(res,- c,ev_i,res,f_size_block);
         }
 	
       }
-      
+
+      printf("evec %d ressqr = %g\n",j,norm_of_evec(block_data,j) / norm_j);
     }
 
+    double t1 = dclock();
+    
+    printf("Computing block-coefficients took %.2g seconds\n",t1-t0);
+
   }
+
+  // TODO: write out block_data_ortho and block_coef, preferrably in FP16 (could make this optional, another factor of 2 in compression)
+  // for FP16 we need to look at variation of exponents of coefficients; how many can we group?
   
 
   // Cleanup
