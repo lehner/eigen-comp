@@ -385,8 +385,8 @@ int main(int argc, char* argv[]) {
 	      int co;
 	      for (co=0;co<12;co++) {
 		float* in=&raw_in_ev[ get_bfm_index(pos,co) ];
-		dst[0] = in[0]; // may convert precision depending on OPT
-		dst[1] = in[1];
+		dst[2*co + 0] = in[0]; // may convert precision depending on OPT
+		dst[2*co + 1] = in[1];
 	      }
 	    }
 	  }
