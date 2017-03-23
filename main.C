@@ -43,9 +43,11 @@ int f_size, neig, f_size_block;
 
 float* raw_in;
 
-vector< vector<float> > block_data; 
+#define OPT double
 
-vector< vector<float> > block_data_ortho; 
+vector< vector<OPT> > block_data; 
+
+vector< vector<OPT> > block_data_ortho; 
 
 //float* ord_in; // in non-bfm ordering:  co fastest, then x,y,z,t,s
 
@@ -168,14 +170,15 @@ complex<T> sp(T* a, T* b, int f_size) {
   return res;
 }
 
-double norm_of_evec(vector< vector<float> >& v, int j) {
-  double gg = 0.0;
+template<class T>
+T norm_of_evec(vector< vector<T> >& v, int j) {
+  T gg = 0.0;
 #pragma omp parallel shared(gg)
   {
-    double ggl = 0.0;
+    T ggl = 0.0;
 #pragma omp for
     for (int nb=0;nb<args.blocks;nb++) {
-      float* res = &v[nb][ (int64_t)f_size_block * j ];
+      T* res = &v[nb][ (int64_t)f_size_block * j ];
       ggl += sp_single(res,res,f_size_block).real();
     }
 
@@ -377,11 +380,14 @@ int main(int argc, char* argv[]) {
 	      int bid = pos_to_index(block_coor, args.nb);
 	      int ii = pos_to_index(pos_in_block, args.b) / 2;
 
-	      float* dst = &block_data[bid][ ii*24 + (int64_t)f_size_block * nev ];
+	      OPT* dst = &block_data[bid][ ii*24 + (int64_t)f_size_block * nev ];
 	      
 	      int co;
-	      for (co=0;co<12;co++)
-		memcpy(&dst[2*co],&raw_in_ev[ get_bfm_index(pos,co) ],2*sizeof(float));
+	      for (co=0;co<12;co++) {
+		float* in=&raw_in_ev[ get_bfm_index(pos,co) ];
+		dst[0] = in[0]; // may convert precision depending on OPT
+		dst[1] = in[1];
+	      }
 	    }
 	  }
 	}
@@ -401,7 +407,7 @@ int main(int argc, char* argv[]) {
       int i;
       double nrm_blocks = 0.0;
       for (i=0;i<args.blocks;i++) {
-	float* in_ev = &block_data[i][ (int64_t)f_size_block * test_ev ];
+	OPT* in_ev = &block_data[i][ (int64_t)f_size_block * test_ev ];
 	nrm_blocks += sp(in_ev,in_ev,f_size_block).real();
       }
 
@@ -430,19 +436,19 @@ int main(int argc, char* argv[]) {
 
       for (int iev=0;iev<nevmax;iev++) {
 
-	float* orig = &block_data[nb][ (int64_t)f_size_block * iev ];
-	float* res = &block_data_ortho[nb][ (int64_t)f_size_block * iev ];
+	OPT* orig = &block_data[nb][ (int64_t)f_size_block * iev ];
+	OPT* res = &block_data_ortho[nb][ (int64_t)f_size_block * iev ];
 
-	memcpy(res,orig,sizeof(float)*f_size_block);
+	memcpy(res,orig,sizeof(OPT)*f_size_block);
 	
 	for (int jev=0;jev<iev;jev++) {
 	  
-	  float* ev_j = &block_data_ortho[nb][ (int64_t)f_size_block * jev ];
+	  OPT* ev_j = &block_data_ortho[nb][ (int64_t)f_size_block * jev ];
 	  
 	  // res = |i> - <j|i> |j>
 	  // <j|res>
-	  complex<float> nrm_j = sp_single(ev_j,ev_j,f_size_block);
-	  complex<float> res_j = sp_single(ev_j,res,f_size_block);
+	  complex<OPT> nrm_j = sp_single(ev_j,ev_j,f_size_block);
+	  complex<OPT> res_j = sp_single(ev_j,res,f_size_block);
 	  
 	  caxpy_single(res,- res_j / nrm_j,ev_j,res,f_size_block);
 	}
@@ -470,11 +476,11 @@ int main(int argc, char* argv[]) {
 
 #pragma omp parallel for
 	for (int nb=0;nb<args.blocks;nb++) {
-	  float* res = &block_data[nb][ (int64_t)f_size_block * j ];
-	  float* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
+	  OPT* res = &block_data[nb][ (int64_t)f_size_block * j ];
+	  OPT* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
 	  
-	  complex<float> nrm_i = sp_single(ev_i,ev_i,f_size_block);
-	  complex<float> res_i = sp_single(ev_i,res,f_size_block);
+	  complex<OPT> nrm_i = sp_single(ev_i,ev_i,f_size_block);
+	  complex<OPT> res_i = sp_single(ev_i,res,f_size_block);
 	  
 	  caxpy_single(res,- res_i / nrm_i,ev_i,res,f_size_block);
         }
