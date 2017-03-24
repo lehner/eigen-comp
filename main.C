@@ -1,3 +1,4 @@
+#define _FILE_OFFSET_BITS 64
 #include <omp.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -10,6 +11,9 @@
 using namespace std;
 
 #define MAX_EVEC_PRINT_NORM 8
+#define FP16_WIDTH_24 2.0833333333333
+#define FP16_COEF_EXP_SHARE_FLOATS 10
+#define FP16_WIDTH_COEF (2.0*(1.0 + 1.0 / (double)FP16_COEF_EXP_SHARE_FLOATS))
 
 int nthreads;
 uint32_t crc32_fast(const void* data, size_t length, uint32_t previousCrc32);
@@ -45,11 +49,14 @@ struct {
 } args;
 
 int vol4d, vol5d;
-int f_size, neig, f_size_block, f_size_coef_block;
+int f_size, neig, f_size_block, f_size_coef_block, nkeep_fp16;
 
 float* raw_in;
 
-#define OPT double
+#ifndef OPT
+//#define OPT double
+#define OPT float
+#endif
 
 vector< vector<OPT> > block_data; 
 
@@ -204,6 +211,140 @@ T norm_of_evec(vector< vector<T> >& v, int j) {
   return gg;
 }
 
+
+void write_bytes(void* buf, int64_t s, FILE* f, uint32_t& crc) {
+  static double data_counter = 0.0;
+
+  // checksum
+  crc = crc32_fast(buf,s,crc);
+
+  double t0 = dclock();
+  if (fwrite(buf,s,1,f) != 1) {
+    fprintf(stderr,"Write failed!\n");
+    exit(2);
+  }
+  double t1 = dclock();
+
+  data_counter += (double)s;
+  if (data_counter > 1024.*1024.*256) {
+    printf("Writing at %g GB/s\n",(double)s / 1024./1024./1024. / (t1-t0));
+    data_counter = 0.0;
+  }
+}
+
+void write_floats(FILE* f, uint32_t& crc, OPT* in, int64_t n) {
+  float* buf = (float*)malloc( sizeof(float) * n );
+  if (!buf) {
+    fprintf(stderr,"Out of mem\n");
+    exit(1);
+  }
+
+  // convert to float if needed
+#pragma omp parallel for
+  for (int64_t i=0;i<n;i++)
+    buf[i] = in[i];
+
+  write_bytes(buf,n*sizeof(float),f,crc);
+
+  free(buf);
+}
+
+int fp_map(float in, float min, float max, int N) {
+  // Idea:
+  //
+  // min=-6
+  // max=6
+  //
+  // N=1
+  // [-6,0] -> 0, [0,6] -> 1;  reconstruct 0 -> -3, 1-> 3
+  //
+  // N=2
+  // [-6,-2] -> 0, [-2,2] -> 1, [2,6] -> 2;  reconstruct 0 -> -4, 1->0, 2->4
+  int ret =  (int) ( (float)(N+1) * ( (in - min) / (max - min) ) );
+  if (ret == N+1) {
+    ret = N;
+  }
+  return ret;
+}
+
+float fp_unmap(int val, float min, float max, int N) {
+  return min + (float)(val + 0.5) * (max - min)  / (float)( N + 1 );
+}
+
+#define SHRT_UMAX 65535
+
+// can assume that v >=0 and need to guarantee that unmap_fp16_exp(map_fp16_exp(v)) >= v
+unsigned short map_fp16_exp(float v) {
+  // float has exponents 10^{-44.85} .. 10^{38.53}
+#define BASE 1.4142135623730950488
+  int exp = (int)ceil(log(v) / log(BASE)) + SHRT_UMAX / 2;
+  if (exp < 0 || exp > SHRT_UMAX) {
+    fprintf(stderr,"Error in map_fp16_exp(%g,%d)\n",v,exp);
+    exit(3);
+  }
+
+  return (unsigned short)exp;
+}
+
+float unmap_fp16_exp(unsigned short e) {
+  float de = (float)((int)e - SHRT_UMAX / 2);
+  return powf( BASE, de );
+}
+
+void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
+
+  int64_t nsites = n / nsc;
+  if (n % nsc) {
+    fprintf(stderr,"Invalid size in write_floats_fp16\n");
+    exit(4);
+  }
+
+  unsigned short* buf = (unsigned short*)malloc( sizeof(short) * (n + nsites) );
+  if (!buf) {
+    fprintf(stderr,"Out of mem\n");
+    exit(1);
+  }
+
+#define assert(exp)  { if ( !(exp) ) { fprintf(stderr,"Assert " #exp " failed\n"); exit(84); } }
+  
+  // do for each site
+#pragma omp parallel for
+  for (int64_t site = 0;site<nsites;site++) {
+
+    OPT* ev = &in[site*nsc];
+
+    unsigned short* bptr = &buf[site*(nsc + 1)];
+
+    float max = fabs(ev[0]);
+    float min;
+
+    for (int i=0;i<nsc;i++) {
+      if (ev[i]*ev[i] > max*max)
+	max = fabs(ev[i]);
+    }
+
+    unsigned short exp = map_fp16_exp(max);
+    max = unmap_fp16_exp(exp);
+    min = -max;
+
+    *bptr++ = exp;
+
+    for (int i=0;i<nsc;i++) {
+      int val = fp_map( ev[i], min, max, SHRT_UMAX );
+      assert(!(val < 0 || val > SHRT_UMAX));
+      *bptr++ = (unsigned short)val;
+    }
+
+  }
+
+  write_bytes(buf,sizeof(short)*(n + nsites),f,crc);
+
+  free(buf);
+}
+
+
+
+
 int main(int argc, char* argv[]) {
 #pragma omp parallel
   {
@@ -270,6 +411,8 @@ int main(int argc, char* argv[]) {
     printf("number of blocks = %d\n",args.blocks);
     printf("f_size_block = %d\n",f_size_block);
 
+    printf("Internally using sizeof(OPT) = %d\n",sizeof(OPT));
+
     printf("\n");
   }
 
@@ -299,15 +442,15 @@ int main(int argc, char* argv[]) {
 
     printf("Size of operating coefficient data in GB: %g\n", (double)f_size_coef_block * (double)args.blocks / 1024./1024./1024. * sizeof(OPT));
 
+    nkeep_fp16 = args.nkeep - args.nkeep_single;
+    if (nkeep_fp16 < 0)
+      nkeep_fp16 = 0;
+
     // estimate of compression
 
     {
-      int nkeep_fp16 = args.nkeep - args.nkeep_single;
-      if (nkeep_fp16 < 0)
-	nkeep_fp16 = 0;
-
-      double size_of_coef_data = (neig * 2 * (double)args.blocks * (args.nkeep_single * 4 + nkeep_fp16 * 2))  / 1024. / 1024. / 1024.;
-      double size_of_evec_data = (args.nkeep_single * f_size * 4 + nkeep_fp16 * f_size * 2)  / 1024. / 1024. / 1024.;
+      double size_of_coef_data = (neig * FP16_WIDTH_COEF * (double)args.blocks * (args.nkeep_single * 4 + nkeep_fp16 * FP16_WIDTH_COEF))  / 1024. / 1024. / 1024.;
+      double size_of_evec_data = ((args.nkeep - nkeep_fp16)* f_size * 4 + nkeep_fp16 * f_size * FP16_WIDTH_24)  / 1024. / 1024. / 1024.;
       double size_orig = (double)size  / 1024. / 1024. / 1024.;
       double size_of_comp = size_of_coef_data+size_of_evec_data;
       printf("--------------------------------------------------------------------------------\n");
@@ -471,37 +614,60 @@ int main(int argc, char* argv[]) {
     double t0 = dclock();
 
     int nevmax = args.nkeep;
-    
-#pragma omp parallel for
-    for (int nb=0;nb<args.blocks;nb++) {
-      
-      for (int iev=0;iev<nevmax;iev++) {
+
+    double flops = 0.0;
+    double bytes = 0.0;
+#pragma omp parallel shared(flops,bytes)
+    {
+      double flopsl = 0.0;
+      double bytesl = 0.0;
+#define COUNT_FLOPS_BYTES(f,b) flopsl += (f) + 1; bytesl += (b) + 2;
+      // #define COUNT_FLOPS_BYTES(f,b)
+
+#pragma omp for
+      for (int nb=0;nb<args.blocks;nb++) {
 	
-	OPT* orig = &block_data[nb][ (int64_t)f_size_block * iev ];
-	OPT* res = &block_data_ortho[nb][ (int64_t)f_size_block * iev ];
-	
-	memcpy(res,orig,sizeof(OPT)*f_size_block);
-	
-	for (int jev=0;jev<iev;jev++) {
+	for (int iev=0;iev<nevmax;iev++) {
 	  
-	  OPT* ev_j = &block_data_ortho[nb][ (int64_t)f_size_block * jev ];
+	  OPT* orig = &block_data[nb][ (int64_t)f_size_block * iev ];
+	  OPT* res = &block_data_ortho[nb][ (int64_t)f_size_block * iev ];
 	  
-	  // res = |i> - <j|i> |j>
-	  // <j|res>
-	  complex<OPT> res_j = sp_single(ev_j,res,f_size_block);
-	  caxpy_single(res,- res_j,ev_j,res,f_size_block);
+	  memcpy(res,orig,sizeof(OPT)*f_size_block); 	  COUNT_FLOPS_BYTES(f_size_block,2*f_size_block*sizeof(OPT));
+
+	  for (int jev=0;jev<iev;jev++) {
+	    
+	    OPT* ev_j = &block_data_ortho[nb][ (int64_t)f_size_block * jev ];
+	    
+	    // res = |i> - <j|i> |j>
+	    // <j|res>
+	    complex<OPT> res_j = sp_single(ev_j,res,f_size_block);  
+	    COUNT_FLOPS_BYTES(8 / 2 * f_size_block, 2*f_size_block*sizeof(OPT)); // 6 per complex multiply, 2 per complex add -> 8 / 2 = 4
+
+	    caxpy_single(res,- res_j,ev_j,res,f_size_block); 
+	    COUNT_FLOPS_BYTES(8 / 2 * f_size_block, 3*f_size_block*sizeof(OPT));
+	  }
+	  
+	  // normalize
+	  complex<OPT> nrm = sp_single(res,res,f_size_block); 
+	  COUNT_FLOPS_BYTES(8 / 2 * f_size_block,2*f_size_block*sizeof(OPT));
+
+	  scale_single(res, (OPT)(1.0 / sqrt(nrm.real())),f_size_block); 
+	  COUNT_FLOPS_BYTES(f_size_block,2*f_size_block*sizeof(OPT));
+	  
 	}
+      }
 
-	// normalize
-	complex<OPT> nrm = sp_single(res,res,f_size_block);
-	scale_single(res, 1.0 / sqrt(nrm.real()),f_size_block);
-
+#pragma omp critical
+      {
+	flops += flopsl + 1;
+	bytes += bytesl + 2;
       }
     }
     
     double t1 = dclock();
 
-    printf("Gram-Schmidt took %.4g seconds\n",t1-t0);
+    printf("Gram-Schmidt took %.4g seconds (%g Gflops/s, %g GB/s)\n",t1-t0,flops / (t1-t0) / 1000./1000./1000.,
+	   bytes / (t1-t0) / 1024./1024./1024.);
 
   }
 
@@ -556,9 +722,66 @@ int main(int argc, char* argv[]) {
 
   }
 
-  // TODO: write out block_data_ortho and block_coef, preferrably in FP16 (could make this optional, another factor of 2 in compression)
-  // for FP16 we need to look at variation of exponents of coefficients; how many can we group?
-  
+  // write result
+  {
+    char buf[1024];
+    sprintf(buf,"%2.2d/%10.10d.compressed",args.findex / args.filesperdir,args.findex);
+    FILE* f = fopen(buf,"w+b");
+    if (!f) {
+      fprintf(stderr,"Could not open %s for writing!\n",buf);
+      return 1;
+    }
+
+    uint32_t crc = 0x0;
+
+    off_t begin_fp16_evec;
+    off_t begin_coef;
+
+    int nb;
+
+    int _t = (int64_t)f_size_block * (args.nkeep - nkeep_fp16);
+    for (nb=0;nb<args.blocks;nb++)
+      write_floats(f,crc,  &block_data_ortho[nb][0], _t );
+
+    begin_fp16_evec = ftello(f);
+
+    for (nb=0;nb<args.blocks;nb++)
+      write_floats_fp16(f,crc,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
+
+    begin_coef = ftello(f);
+    
+    // write coefficients of args.nkeep_single as floats, higher coefficients as fp16
+   
+#if 1
+    for (int nb=0;nb<2;nb++) {
+      
+      for (int j = 0; j < 2000; j++) {
+	
+	printf("Coefficients of block %d, eigenvector %d\n",nb,j);
+	
+	for (int i = 105; i < 106; i++) {
+	  
+	  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+	  
+	  printf("c[%d] = %g , %g\n",i,cptr[0],cptr[1]);
+	}
+      }
+    }
+#endif
+
+    int j;
+    for (j=0;j<neig;j++)
+      for (nb=0;nb<args.blocks;nb++) {
+	write_floats(f,crc,  &block_coef[nb][2*args.nkeep*j], 2*(args.nkeep - nkeep_fp16) );
+	write_floats_fp16(f,crc,  &block_coef[nb][2*args.nkeep*j + 2*(args.nkeep - nkeep_fp16) ], 2*nkeep_fp16 , FP16_COEF_EXP_SHARE_FLOATS);
+      }
+
+    fclose(f);
+  }
+
+  // write meta data incl CRC
+  {
+  }
 
   // Cleanup
   free(raw_in);
