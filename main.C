@@ -338,14 +338,14 @@ int main(int argc, char* argv[]) {
 
     double size_in_gb = f_size * (double)neig * sizeof(float) / 1024. / 1024. / 1024.;
 
-    printf("Read %.2g GB in %.2g seconds at %.2g GB/s\n",
+    printf("Read %.4g GB in %.4g seconds at %.4g GB/s\n",
 	   size_in_gb, t1-t0,size_in_gb / (t1-t0) );
 
     uint32_t crc_comp = crc32_fast(raw_in,(size_t)f_size * neig * sizeof(float),0);
 
     double t2 = dclock();
 
-    printf("Computed CRC32: %X   (in %.2g seconds)\n",crc_comp,t2-t1);
+    printf("Computed CRC32: %X   (in %.4g seconds)\n",crc_comp,t2-t1);
 
     fclose(f);
 
@@ -437,7 +437,7 @@ int main(int argc, char* argv[]) {
 
     double t1 = dclock();
 
-    printf("Created block structure in %.2g seconds\n",t1-t0);
+    printf("Created block structure in %.4g seconds\n",t1-t0);
 
     // simple test
     {
@@ -471,15 +471,15 @@ int main(int argc, char* argv[]) {
     double t0 = dclock();
 
     int nevmax = args.nkeep;
-
+    
 #pragma omp parallel for
     for (int nb=0;nb<args.blocks;nb++) {
-
+      
       for (int iev=0;iev<nevmax;iev++) {
-
+	
 	OPT* orig = &block_data[nb][ (int64_t)f_size_block * iev ];
 	OPT* res = &block_data_ortho[nb][ (int64_t)f_size_block * iev ];
-
+	
 	memcpy(res,orig,sizeof(OPT)*f_size_block);
 	
 	for (int jev=0;jev<iev;jev++) {
@@ -501,7 +501,7 @@ int main(int argc, char* argv[]) {
     
     double t1 = dclock();
 
-    printf("Gram-Schmidt took %.2g seconds\n",t1-t0);
+    printf("Gram-Schmidt took %.4g seconds\n",t1-t0);
 
   }
 
@@ -523,7 +523,7 @@ int main(int argc, char* argv[]) {
       if ((j < args.nkeep && args.vrb_nkeep_res < args.nkeep) ||
 	  !(j % args.vrb_evec_res))
 	norm_j = norm_of_evec(block_data,j);
-
+      
       for (int i=0;i<args.nkeep;i++) {
 	
 	if (i == j && !(i % args.vrb_nkeep_res))
@@ -540,19 +540,19 @@ int main(int argc, char* argv[]) {
 	  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
 	  cptr[0] = c.real();
 	  cptr[1] = c.imag();
-
+	  
 	  caxpy_single(res,- c,ev_i,res,f_size_block);
         }
 	
       }
-
+      
       if (!(j % args.vrb_evec_res))
 	printf("evec_residuum %d = %g\n",j,norm_of_evec(block_data,j) / norm_j);
     }
 
     double t1 = dclock();
     
-    printf("Computing block-coefficients took %.2g seconds\n",t1-t0);
+    printf("Computing block-coefficients took %.4g seconds\n",t1-t0);
 
   }
 
