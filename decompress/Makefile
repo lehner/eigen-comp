@@ -10,7 +10,7 @@ CXX=icpc
 LDFLAGS=-qopenmp
 CXXFLAGS=-xmic-avx512 -O3 -qopenmp
 
-BIN=evc
+BIN=evd
 
 $(BIN): $(OBJS)
 	$(CXX) $(OBJS) $(LDFLAGS) -o $(BIN)
