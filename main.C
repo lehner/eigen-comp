@@ -752,7 +752,7 @@ int main(int argc, char* argv[]) {
     
     // write coefficients of args.nkeep_single as floats, higher coefficients as fp16
    
-#if 1
+#if 0
     for (int nb=0;nb<2;nb++) {
       
       for (int j = 0; j < 2000; j++) {
