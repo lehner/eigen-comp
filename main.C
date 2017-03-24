@@ -29,9 +29,15 @@ struct {
   int s[5];
   int b[5];
   int nkeep;
+
+  int nkeep_single;
+
   int findex;
   int filesperdir;
   int bigendian;
+
+  int vrb_nkeep_res;
+  int vrb_evec_res;
 
   // derived
   int nb[5];
@@ -125,6 +131,12 @@ void caxpy_single(T* res, complex<T> ca, T* x, T* y, int f_size) {
 }    
 
 template<class T>
+void scale_single(T* res, T s, int f_size) {
+  for (int i=0;i<f_size;i++)
+    res[i] *= s;
+}    
+
+template<class T>
 void caxpy(T* res, complex<T> ca, T* x, T* y, int f_size) {
   complex<T>* cx = (complex<T>*)x;
   complex<T>* cy = (complex<T>*)y;
@@ -203,8 +215,8 @@ int main(int argc, char* argv[]) {
 
   printf("%s\n%d threads\n\n",header,nthreads);
 
-  if (argc < 1+14) {
-    fprintf(stderr,"Arguments: sx sy sz st s5 bx by bz bt b5 nkeep fileindex filesperdir bigendian\n");
+  if (argc < 1+17) {
+    fprintf(stderr,"Arguments: sx sy sz st s5 bx by bz bt b5 nkeep fileindex filesperdir bigendian nkeep_single_prec vrb_nkeep_res vrb_evec_res\n");
     return 1;
   }
 
@@ -218,6 +230,9 @@ int main(int argc, char* argv[]) {
     args.findex = atoi(argv[12]);
     args.filesperdir = atoi(argv[13]);
     args.bigendian = atoi(argv[14]);
+    args.nkeep_single = atoi(argv[15]);
+    args.vrb_nkeep_res = atoi(argv[16]);
+    args.vrb_evec_res = atoi(argv[17]);
 
     printf("Parameters:\n");
     for (i=0;i<5;i++)
@@ -228,6 +243,7 @@ int main(int argc, char* argv[]) {
     printf("file_index = %10.10d\n",args.findex);
     printf("files_per_dir = %d\n",args.filesperdir);
     printf("big_endian = %d\n",args.bigendian);
+    printf("nkeep_single = %d\n",args.nkeep_single);
 
     vol4d = args.s[0] * args.s[1] * args.s[2] * args.s[3];
     vol5d = vol4d * args.s[4];
@@ -282,6 +298,25 @@ int main(int argc, char* argv[]) {
     printf("Slot has %d eigenvectors stored\n",neig);
 
     printf("Size of operating coefficient data in GB: %g\n", (double)f_size_coef_block * (double)args.blocks / 1024./1024./1024. * sizeof(OPT));
+
+    // estimate of compression
+
+    {
+      int nkeep_fp16 = args.nkeep - args.nkeep_single;
+      if (nkeep_fp16 < 0)
+	nkeep_fp16 = 0;
+
+      double size_of_coef_data = (neig * 2 * (double)args.blocks * (args.nkeep_single * 4 + nkeep_fp16 * 2))  / 1024. / 1024. / 1024.;
+      double size_of_evec_data = (args.nkeep_single * f_size * 4 + nkeep_fp16 * f_size * 2)  / 1024. / 1024. / 1024.;
+      double size_orig = (double)size  / 1024. / 1024. / 1024.;
+      double size_of_comp = size_of_coef_data+size_of_evec_data;
+      printf("--------------------------------------------------------------------------------\n");
+      printf("Original size:     %g GB\n",size_orig);
+      printf("Compressed size:   %g GB  (%g GB coef, %g GB evec)\n",size_of_comp,size_of_coef_data,size_of_evec_data);
+      printf("Compressed to %.4g%% of original\n",size_of_comp / size_orig * 100.);
+      printf("--------------------------------------------------------------------------------\n");
+    }
+    //
 
     fseeko(f,0,SEEK_SET);
 
@@ -453,11 +488,13 @@ int main(int argc, char* argv[]) {
 	  
 	  // res = |i> - <j|i> |j>
 	  // <j|res>
-	  complex<OPT> nrm_j = sp_single(ev_j,ev_j,f_size_block);
 	  complex<OPT> res_j = sp_single(ev_j,res,f_size_block);
-	  
-	  caxpy_single(res,- res_j / nrm_j,ev_j,res,f_size_block);
+	  caxpy_single(res,- res_j,ev_j,res,f_size_block);
 	}
+
+	// normalize
+	complex<OPT> nrm = sp_single(res,res,f_size_block);
+	scale_single(res, 1.0 / sqrt(nrm.real()),f_size_block);
 
       }
     }
@@ -484,18 +521,17 @@ int main(int argc, char* argv[]) {
 
       for (int i=0;i<args.nkeep;i++) {
 
-	if (i == j)
-	  printf("residuum %d = %g\n",i,norm_of_evec(block_data,j) / norm_j);
+	if (i == j && !(i % args.vrb_nkeep_res))
+	  printf("nkeep_residuum %d = %g\n",i,norm_of_evec(block_data,j) / norm_j);
 
 #pragma omp parallel for
 	for (int nb=0;nb<args.blocks;nb++) {
 	  OPT* res = &block_data[nb][ (int64_t)f_size_block * j ];
 	  OPT* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
 	  
-	  complex<OPT> nrm_i = sp_single(ev_i,ev_i,f_size_block);
 	  complex<OPT> res_i = sp_single(ev_i,res,f_size_block);
 
-	  complex<OPT> c = res_i / nrm_i;
+	  complex<OPT> c = res_i;
 	  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
 	  cptr[0] = c.real();
 	  cptr[1] = c.imag();
@@ -505,7 +541,8 @@ int main(int argc, char* argv[]) {
 	
       }
 
-      printf("evec %d ressqr = %g\n",j,norm_of_evec(block_data,j) / norm_j);
+      if (!(j % args.vrb_evec_res))
+	printf("evec_residuum %d = %g\n",j,norm_of_evec(block_data,j) / norm_j);
     }
 
     double t1 = dclock();
