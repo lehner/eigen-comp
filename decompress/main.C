@@ -46,14 +46,13 @@ struct _evc_meta_ {
 int vol4d, vol5d;
 int f_size, f_size_block, f_size_coef_block, nkeep_fp16;
 
-float* raw_in;
+char* raw_in;
 
 #ifndef OPT
 //#define OPT double
 #define OPT float
 #endif
 
-vector< vector<OPT> > block_data; 
 vector< vector<OPT> > block_data_ortho;
 vector< vector<OPT> > block_coef;
 
@@ -244,6 +243,15 @@ void write_floats(FILE* f, uint32_t& crc, OPT* in, int64_t n) {
   free(buf);
 }
 
+void read_floats(char* & ptr, OPT* out, int64_t n) {
+  float* in = (float*)ptr;
+  ptr += 4*n;
+
+#pragma omp parallel for
+  for (int64_t i=0;i<n;i++)
+    out[i] = in[i];
+}
+
 int fp_map(float in, float min, float max, int N) {
   // Idea:
   //
@@ -284,6 +292,43 @@ unsigned short map_fp16_exp(float v) {
 float unmap_fp16_exp(unsigned short e) {
   float de = (float)((int)e - SHRT_UMAX / 2);
   return powf( BASE, de );
+}
+
+void read_floats_fp16(char* & ptr, OPT* out, int64_t n, int nsc) {
+
+
+  int64_t nsites = n / nsc;
+  if (n % nsc) {
+    fprintf(stderr,"Invalid size in write_floats_fp16\n");
+    exit(4);
+  }
+
+  unsigned short* in = (unsigned short*)ptr;
+  ptr += 2*(n+nsites);
+
+#define assert(exp)  { if ( !(exp) ) { fprintf(stderr,"Assert " #exp " failed\n"); exit(84); } }
+  
+  // do for each site
+#pragma omp parallel for
+  for (int64_t site = 0;site<nsites;site++) {
+
+    OPT* ev = &out[site*nsc];
+
+    unsigned short* bptr = &in[site*(nsc + 1)];
+
+
+    unsigned short exp = *bptr++;
+    max = unmap_fp16_exp(exp);
+    min = -max;
+
+    for (int i=0;i<nsc;i++) {
+      int val = fp_map( ev[i], min, max, SHRT_UMAX );
+      assert(!(val < 0 || val > SHRT_UMAX));
+      *bptr++ = (unsigned short)val;
+    }
+
+  }
+
 }
 
 
@@ -426,7 +471,98 @@ int main(int argc, char* argv[]) {
     printf("Internally using sizeof(OPT) = %d\n",sizeof(OPT));
 
     printf("\n");
+
+    nkeep_fp16 = args.nkeep - args.nkeep_single;
+    if (nkeep_fp16 < 0)
+      nkeep_fp16 = 0;
   }
 
+  {
+    char buf[1024];
+    off_t size;
+
+    sprintf(buf,"%s.compressed",root);
+    FILE* f = fopen(buf,"r+b");
+    if (!f) {
+      fprintf(stderr,"Could not open %s\n",buf);
+      return 0;
+    }
+
+    fseeko(f,0,SEEK_END);
+
+    size = ftello(f);
+
+    fseeko(f,0,SEEK_SET);
+
+    double size_in_gb = (double)size / 1024. / 1024. / 1024.;
+    printf("Compressed file is %g GB\n",size_in_gb);
+
+    raw_in = (char*)malloc( size );
+    if (!raw_in) {
+      fprintf(stderr,"Out of mem\n");
+      return 5;
+    }
+
+    double t0 = dclock();
+
+    if (fread(raw_in,size,1,f) != 1) {
+      fprintf(stderr,"Invalid fread\n");
+      return 6;
+    }
+
+    double t1 = dclock();
+
+    printf("Read %.4g GB in %.4g seconds at %.4g GB/s\n",
+	   size_in_gb, t1-t0,size_in_gb / (t1-t0) );
+
+    uint32_t crc_comp = crc32_fast(raw_in,size,0);
+
+    double t2 = dclock();
+
+    printf("Computed CRC32: %X   (in %.4g seconds)\n",crc_comp,t2-t1);
+    printf("Expected CRC32: %X\n",args.crc32);
+
+    if (crc_comp != args.crc32) {
+      fprintf(stderr,"Corrupted file!\n");
+      return 9;
+    }
+    
+    fclose(f);
+  }
+
+  {
+    // allocate memory before decompressing
+    block_data_ortho.resize(args.blocks);
+    for (int i=0;i<args.blocks;i++)
+      block_data_ortho[i].resize(f_size_block * args.nkeep);    
+
+    block_coef.resize(args.blocks);
+    for (int i=0;i<args.blocks;i++)
+      block_coef[i].resize(f_size_coef_block);    
+
+    double t0 = dclock();
+
+    // read
+    int _t = (int64_t)f_size_block * (args.nkeep - nkeep_fp16);
+    int nb;
+    char* ptr = raw_in;
+    for (nb=0;nb<args.blocks;nb++)
+      read_floats(ptr,  &block_data_ortho[nb][0], _t );
+    for (nb=0;nb<args.blocks;nb++)
+      read_floats_fp16(ptr,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
+    int j;
+    for (j=0;j<args.neig;j++)
+      for (nb=0;nb<args.blocks;nb++) {
+	read_floats(ptr,  &block_coef[nb][2*args.nkeep*j], 2*(args.nkeep - nkeep_fp16) );
+	read_floats_fp16(ptr,  &block_coef[nb][2*args.nkeep*j + 2*(args.nkeep - nkeep_fp16) ], 2*nkeep_fp16 , args.FP16_COEF_EXP_SHARE_FLOATS);
+      }
+
+    double t1 = dclock();
+
+    printf("Decompressing single/fp16 to OPT in %g seconds\n",t1-t0);
+
+  }
+
+  free(raw_in);
   return 0;
 }
