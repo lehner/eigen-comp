@@ -724,63 +724,88 @@ int main(int argc, char* argv[]) {
 
   // write result
   {
-    char buf[1024];
-    sprintf(buf,"%2.2d/%10.10d.compressed",args.findex / args.filesperdir,args.findex);
-    FILE* f = fopen(buf,"w+b");
-    if (!f) {
-      fprintf(stderr,"Could not open %s for writing!\n",buf);
-      return 1;
-    }
-
     uint32_t crc = 0x0;
-
     off_t begin_fp16_evec;
     off_t begin_coef;
-
-    int nb;
-
-    int _t = (int64_t)f_size_block * (args.nkeep - nkeep_fp16);
-    for (nb=0;nb<args.blocks;nb++)
-      write_floats(f,crc,  &block_data_ortho[nb][0], _t );
-
-    begin_fp16_evec = ftello(f);
-
-    for (nb=0;nb<args.blocks;nb++)
-      write_floats_fp16(f,crc,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
-
-    begin_coef = ftello(f);
+    char buf[1024];
     
-    // write coefficients of args.nkeep_single as floats, higher coefficients as fp16
-   
-#if 0
-    for (int nb=0;nb<2;nb++) {
+    // write data
+    {
+      sprintf(buf,"%2.2d/%10.10d.compressed",args.findex / args.filesperdir,args.findex);
+      FILE* f = fopen(buf,"w+b");
+      if (!f) {
+	fprintf(stderr,"Could not open %s for writing!\n",buf);
+	return 1;
+      }
       
-      for (int j = 0; j < 2000; j++) {
+      int nb;
+      
+      int _t = (int64_t)f_size_block * (args.nkeep - nkeep_fp16);
+      for (nb=0;nb<args.blocks;nb++)
+	write_floats(f,crc,  &block_data_ortho[nb][0], _t );
+      
+      begin_fp16_evec = ftello(f);
+      
+      for (nb=0;nb<args.blocks;nb++)
+	write_floats_fp16(f,crc,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
+      
+      begin_coef = ftello(f);
+      
+      // write coefficients of args.nkeep_single as floats, higher coefficients as fp16
+      
+#if 0
+      for (int nb=0;nb<2;nb++) {
 	
-	printf("Coefficients of block %d, eigenvector %d\n",nb,j);
-	
-	for (int i = 105; i < 106; i++) {
+	for (int j = 0; j < 2000; j++) {
 	  
-	  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+	  printf("Coefficients of block %d, eigenvector %d\n",nb,j);
 	  
-	  printf("c[%d] = %g , %g\n",i,cptr[0],cptr[1]);
+	  for (int i = 105; i < 106; i++) {
+	    
+	    OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+	    
+	    printf("c[%d] = %g , %g\n",i,cptr[0],cptr[1]);
+	  }
 	}
       }
-    }
 #endif
+      
+      int j;
+      for (j=0;j<neig;j++)
+	for (nb=0;nb<args.blocks;nb++) {
+	  write_floats(f,crc,  &block_coef[nb][2*args.nkeep*j], 2*(args.nkeep - nkeep_fp16) );
+	  write_floats_fp16(f,crc,  &block_coef[nb][2*args.nkeep*j + 2*(args.nkeep - nkeep_fp16) ], 2*nkeep_fp16 , FP16_COEF_EXP_SHARE_FLOATS);
+	}
+      
+      fclose(f);
+    }
 
-    int j;
-    for (j=0;j<neig;j++)
-      for (nb=0;nb<args.blocks;nb++) {
-	write_floats(f,crc,  &block_coef[nb][2*args.nkeep*j], 2*(args.nkeep - nkeep_fp16) );
-	write_floats_fp16(f,crc,  &block_coef[nb][2*args.nkeep*j + 2*(args.nkeep - nkeep_fp16) ], 2*nkeep_fp16 , FP16_COEF_EXP_SHARE_FLOATS);
+    // write meta data
+    {
+      sprintf(buf,"%2.2d/%10.10d.meta",args.findex / args.filesperdir,args.findex);
+      FILE* f = fopen(buf,"wt");
+      if (!f) {
+	fprintf(stderr,"Could not open %s for writing!\n",buf);
+	return 1;
       }
 
-    fclose(f);
-  }
+      fprintf(f,"crc32 = %X\n",crc);
+      int i;
+      for (i=0;i<5;i++)
+	fprintf(f,"s[%d] = %d\n",i,args.s[i]);
+      for (i=0;i<5;i++)
+	fprintf(f,"b[%d] = %d\n",i,args.b[i]);
+      for (i=0;i<5;i++)
+	fprintf(f,"nb[%d] = %d\n",i,args.nb[i]);
+      fprintf(f,"neig = %d\n",neig);
+      fprintf(f,"nkeep = %d\n",args.nkeep);
+      fprintf(f,"nkeep_single = %d\n",args.nkeep_single);
+      fprintf(f,"blocks = %d\n",args.blocks);
+      fprintf(f,"FP16_COEF_EXP_SHARE_FLOATS = %d\n",FP16_COEF_EXP_SHARE_FLOATS);
+      fprintf(f,"index = %d\n",args.findex);
 
-  // write meta data incl CRC
-  {
+      fclose(f);
+    }
   }
 
   // Cleanup
