@@ -342,7 +342,17 @@ void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
   free(buf);
 }
 
-
+void get_coef(int nb, int i, int j) {
+  OPT* res = &block_data[nb][ (int64_t)f_size_block * j ];
+  OPT* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
+  complex<OPT> c = sp_single(ev_i,res,f_size_block);
+  
+  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+  cptr[0] = c.real();
+  cptr[1] = c.imag();
+  
+  caxpy_single(res,- c,ev_i,res,f_size_block);
+}
 
 
 int main(int argc, char* argv[]) {
@@ -681,40 +691,48 @@ int main(int argc, char* argv[]) {
 
     double t0 = dclock();
 
-    for (int j=0;j<neig;j++) {
+    if (!args.vrb_nkeep_res && !args.vrb_evec_res) {
+      printf("Do not display convergence, use fast codepath for obtaining coefficients\n");
 
-      double norm_j = -1.0;
-
-      // only compute norm if needed for verbosity
-      if ((j < args.nkeep && args.vrb_nkeep_res < args.nkeep) ||
-	  !(j % args.vrb_evec_res))
-	norm_j = norm_of_evec(block_data,j);
-      
-      for (int i=0;i<args.nkeep;i++) {
-	
-	if (i == j && !(i % args.vrb_nkeep_res))
-	  printf("nkeep_residuum %d = %g\n",i,norm_of_evec(block_data,j) / norm_j);
-	
 #pragma omp parallel for
-	for (int nb=0;nb<args.blocks;nb++) {
-	  OPT* res = &block_data[nb][ (int64_t)f_size_block * j ];
-	  OPT* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
-	  
-	  complex<OPT> res_i = sp_single(ev_i,res,f_size_block);
-	  
-	  complex<OPT> c = res_i;
-	  OPT* cptr = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
-	  cptr[0] = c.real();
-	  cptr[1] = c.imag();
-	  
-	  caxpy_single(res,- c,ev_i,res,f_size_block);
-        }
-	
+      for (int nb=0;nb<args.blocks;nb++) {
+	for (int j=0;j<neig;j++) {
+	  for (int i=0;i<args.nkeep;i++) {
+	    get_coef(nb,i,j);
+	  }
+	}
       }
+
+    } else {
+
+      printf("Slow codepath to display convergence\n");
       
-      if (!(j % args.vrb_evec_res))
-	printf("evec_residuum %d = %g\n",j,norm_of_evec(block_data,j) / norm_j);
+      for (int j=0;j<neig;j++) {
+	
+	double norm_j = -1.0;
+	
+	// only compute norm if needed for verbosity
+	if ((j < args.nkeep && args.vrb_nkeep_res < args.nkeep) ||
+	    !(j % args.vrb_evec_res))
+	  norm_j = norm_of_evec(block_data,j);
+	
+	for (int i=0;i<args.nkeep;i++) {
+	  
+	  if (i == j && !(i % args.vrb_nkeep_res))
+	    printf("nkeep_residuum %d = %g\n",i,norm_of_evec(block_data,j) / norm_j);
+	  
+#pragma omp parallel for
+	  for (int nb=0;nb<args.blocks;nb++) {
+	    get_coef(nb,i,j);
+	  }
+	  
+	}
+	
+	if (!(j % args.vrb_evec_res))
+	  printf("evec_residuum %d = %g\n",j,norm_of_evec(block_data,j) / norm_j);
+      }
     }
+
 
     double t1 = dclock();
     
