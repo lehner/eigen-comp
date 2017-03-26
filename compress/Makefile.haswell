@@ -8,8 +8,10 @@ OBJS := $(notdir $(OBJS_SRC))
 
 CXX=icpc
 LDFLAGS=-qopenmp
-#CXXFLAGS=-xmic-avx512 -O3 -fp-model consistent -qopenmp -DOPT=float
-CXXFLAGS=-xmic-avx512 -O3 -fp-model precise -fp-model source -qopenmp -DOPT=float
+#FPMODEL=-fp-model consistent
+FPMODEL=
+CXXFLAGS=-march=core-avx2 -O3 $(FPMODEL) -qopenmp -DOPT=float
+
 
 
 BIN=evc
@@ -18,7 +20,7 @@ $(BIN): $(OBJS)
 	$(CXX) $(OBJS) $(LDFLAGS) -o $(BIN)
 
 .C.o:
-	$(CXX) -o $@ $(CXXFLAGS) -c $<
+	$(CXX) -o $@ $(CXXFLAGS) -DCXXFLAGS="\"$(CXXFLAGS)\"" -c $<
 
 clean:
 	rm -f *.o  $(BIN)

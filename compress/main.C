@@ -27,7 +27,10 @@ inline double dclock() {
 const char* header = 
   "QCD eigenvector compressor\n"
   "Authors: Christoph Lehner\n"
-  "Date: 2017\n";
+  "Date: 2017\n"
+  "\n"
+  "CXXFLAGS = " CXXFLAGS "\n"
+  "\n";
 
 struct {
   int s[5];
