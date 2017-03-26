@@ -463,7 +463,7 @@ int main(int argc, char* argv[]) {
     // estimate of compression
 
     {
-      double size_of_coef_data = (neig * FP16_WIDTH_COEF * (double)args.blocks * (args.nkeep_single * 4 + nkeep_fp16 * FP16_WIDTH_COEF))  / 1024. / 1024. / 1024.;
+      double size_of_coef_data = (neig * (double)args.blocks * (args.nkeep_single * 4 + nkeep_fp16 * FP16_WIDTH_COEF)*2)  / 1024. / 1024. / 1024.;
       double size_of_evec_data = ((args.nkeep - nkeep_fp16)* f_size * 4 + nkeep_fp16 * f_size * FP16_WIDTH_24)  / 1024. / 1024. / 1024.;
       double size_orig = (double)size  / 1024. / 1024. / 1024.;
       double size_of_comp = size_of_coef_data+size_of_evec_data;
@@ -772,7 +772,7 @@ int main(int argc, char* argv[]) {
 	write_floats_fp16(f,crc,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
       
       begin_coef = ftello(f);
-      
+
       // write coefficients of args.nkeep_single as floats, higher coefficients as fp16
       
 #if 0

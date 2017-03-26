@@ -316,15 +316,12 @@ void read_floats_fp16(char* & ptr, OPT* out, int64_t n, int nsc) {
 
     unsigned short* bptr = &in[site*(nsc + 1)];
 
-
     unsigned short exp = *bptr++;
-    max = unmap_fp16_exp(exp);
-    min = -max;
+    OPT max = unmap_fp16_exp(exp);
+    OPT min = -max;
 
     for (int i=0;i<nsc;i++) {
-      int val = fp_map( ev[i], min, max, SHRT_UMAX );
-      assert(!(val < 0 || val > SHRT_UMAX));
-      *bptr++ = (unsigned short)val;
+      ev[i] = fp_unmap( *bptr++, min, max, SHRT_UMAX );
     }
 
   }
@@ -475,6 +472,8 @@ int main(int argc, char* argv[]) {
     nkeep_fp16 = args.nkeep - args.nkeep_single;
     if (nkeep_fp16 < 0)
       nkeep_fp16 = 0;
+
+    f_size_coef_block = args.neig * 2 * args.nkeep;
   }
 
   {
@@ -532,14 +531,17 @@ int main(int argc, char* argv[]) {
 
   {
     // allocate memory before decompressing
+    double uncomp_opt_size = 0.0;
     block_data_ortho.resize(args.blocks);
-    for (int i=0;i<args.blocks;i++)
+    for (int i=0;i<args.blocks;i++) {
       block_data_ortho[i].resize(f_size_block * args.nkeep);    
-
+      uncomp_opt_size += (double)f_size_block * args.nkeep;
+    }
     block_coef.resize(args.blocks);
-    for (int i=0;i<args.blocks;i++)
+    for (int i=0;i<args.blocks;i++) {
       block_coef[i].resize(f_size_coef_block);    
-
+      uncomp_opt_size += (double)f_size_coef_block;
+    }
     double t0 = dclock();
 
     // read
@@ -550,6 +552,9 @@ int main(int argc, char* argv[]) {
       read_floats(ptr,  &block_data_ortho[nb][0], _t );
     for (nb=0;nb<args.blocks;nb++)
       read_floats_fp16(ptr,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
+
+    double t1 = dclock();
+
     int j;
     for (j=0;j<args.neig;j++)
       for (nb=0;nb<args.blocks;nb++) {
@@ -557,9 +562,10 @@ int main(int argc, char* argv[]) {
 	read_floats_fp16(ptr,  &block_coef[nb][2*args.nkeep*j + 2*(args.nkeep - nkeep_fp16) ], 2*nkeep_fp16 , args.FP16_COEF_EXP_SHARE_FLOATS);
       }
 
-    double t1 = dclock();
+    double t2 = dclock();
 
-    printf("Decompressing single/fp16 to OPT in %g seconds\n",t1-t0);
+    printf("Decompressing single/fp16 to OPT in %g seconds for evec and %g seconds for coefficients; %g GB uncompressed\n",t1-t0,t2-t1,
+	   uncomp_opt_size * sizeof(OPT) / 1024./1024./1024.);
 
   }
 
