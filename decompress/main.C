@@ -247,7 +247,6 @@ void read_floats(char* & ptr, OPT* out, int64_t n) {
   float* in = (float*)ptr;
   ptr += 4*n;
 
-#pragma omp parallel for
   for (int64_t i=0;i<n;i++)
     out[i] = in[i];
 }
@@ -309,7 +308,6 @@ void read_floats_fp16(char* & ptr, OPT* out, int64_t n, int nsc) {
 #define assert(exp)  { if ( !(exp) ) { fprintf(stderr,"Assert " #exp " failed\n"); exit(84); } }
   
   // do for each site
-#pragma omp parallel for
   for (int64_t site = 0;site<nsites;site++) {
 
     OPT* ev = &out[site*nsc];
@@ -545,22 +543,37 @@ int main(int argc, char* argv[]) {
     double t0 = dclock();
 
     // read
+#define FP_16_SIZE(a,b)  (( (a) + (a/b) )*2)
     int _t = (int64_t)f_size_block * (args.nkeep - nkeep_fp16);
-    int nb;
-    char* ptr = raw_in;
-    for (nb=0;nb<args.blocks;nb++)
-      read_floats(ptr,  &block_data_ortho[nb][0], _t );
-    for (nb=0;nb<args.blocks;nb++)
-      read_floats_fp16(ptr,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
-
+    
+    //char* ptr = raw_in;
+#pragma omp parallel
+    {
+#pragma omp for  
+      for (int nb=0;nb<args.blocks;nb++) {
+	char* ptr = raw_in + nb*_t*4;
+	read_floats(ptr,  &block_data_ortho[nb][0], _t );
+      }
+#pragma omp for
+      for (int nb=0;nb<args.blocks;nb++) {
+	char* ptr = raw_in + args.blocks*_t*4 + FP_16_SIZE( (int64_t)f_size_block * nkeep_fp16 , 24 ) * nb;
+	read_floats_fp16(ptr,  &block_data_ortho[nb][ _t ], (int64_t)f_size_block * nkeep_fp16, 24 );
+      }
+    }
+    
     double t1 = dclock();
 
-    int j;
-    for (j=0;j<args.neig;j++)
-      for (nb=0;nb<args.blocks;nb++) {
+    char* raw_in_coef = raw_in + args.blocks*_t*4 + FP_16_SIZE( (int64_t)f_size_block * nkeep_fp16 , 24 ) * args.blocks;
+    int64_t sz1 = 2*(args.nkeep - nkeep_fp16)*4;
+    int64_t sz2 = FP_16_SIZE( 2*nkeep_fp16, args.FP16_COEF_EXP_SHARE_FLOATS);
+#pragma omp parallel for
+    for (int nb=0;nb<args.blocks;nb++) {
+      for (int j=0;j<args.neig;j++) {
+	char* ptr = raw_in_coef + (sz1+sz2)*(j * args.blocks + nb);
 	read_floats(ptr,  &block_coef[nb][2*args.nkeep*j], 2*(args.nkeep - nkeep_fp16) );
 	read_floats_fp16(ptr,  &block_coef[nb][2*args.nkeep*j + 2*(args.nkeep - nkeep_fp16) ], 2*nkeep_fp16 , args.FP16_COEF_EXP_SHARE_FLOATS);
       }
+    }
 
     double t2 = dclock();
 
