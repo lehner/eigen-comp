@@ -8,7 +8,9 @@ OBJS := $(notdir $(OBJS_SRC))
 
 CXX=icpc
 LDFLAGS=-qopenmp
-CXXFLAGS=-xmic-avx512 -O3 -qopenmp -DOPT=float
+#CXXFLAGS=-xmic-avx512 -O3 -fp-model consistent -qopenmp -DOPT=float
+CXXFLAGS=-xmic-avx512 -O3 -fp-model precise -fp-model source -qopenmp -DOPT=float
+
 
 BIN=evc
 
