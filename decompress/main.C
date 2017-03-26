@@ -291,7 +291,7 @@ unsigned short map_fp16_exp(float v) {
 
 float unmap_fp16_exp(unsigned short e) {
   float de = (float)((int)e - SHRT_UMAX / 2);
-  return powf( BASE, de );
+  return pow( BASE, de );
 }
 
 void read_floats_fp16(char* & ptr, OPT* out, int64_t n, int nsc) {
