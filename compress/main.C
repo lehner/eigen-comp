@@ -288,7 +288,7 @@ unsigned short map_fp16_exp(float v) {
 
 float unmap_fp16_exp(unsigned short e) {
   float de = (float)((int)e - SHRT_UMAX / 2);
-  return powf( BASE, de );
+  return pow( BASE, de );
 }
 
 void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
@@ -305,8 +305,6 @@ void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
     exit(1);
   }
 
-#define assert(exp)  { if ( !(exp) ) { fprintf(stderr,"Assert " #exp " failed\n"); exit(84); } }
-  
   // do for each site
 #pragma omp parallel for
   for (int64_t site = 0;site<nsites;site++) {
@@ -315,8 +313,8 @@ void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
 
     unsigned short* bptr = &buf[site*(nsc + 1)];
 
-    float max = fabs(ev[0]);
-    float min;
+    OPT max = fabs(ev[0]);
+    OPT min;
 
     for (int i=0;i<nsc;i++) {
       if (ev[i]*ev[i] > max*max)
@@ -331,7 +329,10 @@ void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
 
     for (int i=0;i<nsc;i++) {
       int val = fp_map( ev[i], min, max, SHRT_UMAX );
-      assert(!(val < 0 || val > SHRT_UMAX));
+      if (val < 0 || val > SHRT_UMAX) {
+	fprintf(stderr,"Assert failed: val = %d (%d), ev[i] = %.15g, max = %.15g, exp = %d\n",val,SHRT_UMAX,ev[i],max,(int)exp);
+	exit(48);
+      }
       *bptr++ = (unsigned short)val;
     }
 
