@@ -1,0 +1,16 @@
+#!/bin/bash
+x=$1
+y=$2
+z=$3
+t=$4
+
+idx=$5
+nsin=$6
+
+make -f Makefile.knl && (
+ddd=$(pwd); 
+cd /hpcgpfs01/work/clehner/results-196/huge-data-lanc
+${ddd}/evc 12 12 6 12 10 $x $y $z $t 10 400 ${idx} 32 1 $nsin 0 0
+cd -
+)
+
