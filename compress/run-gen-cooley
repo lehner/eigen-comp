@@ -1,0 +1,16 @@
+#!/bin/bash
+x=$1
+y=$2
+z=$3
+t=$4
+
+idx=$5
+nsin=$6
+
+make -f Makefile.cooley && (
+ddd=$(pwd); 
+cd /projects/HadronicLight_2/clehner/test-jobs/evec-comp
+${ddd}/evc 12 12 6 12 10 $x $y $z $t 10 400 ${idx} 32 1 $nsin 2 20
+cd -
+)
+
