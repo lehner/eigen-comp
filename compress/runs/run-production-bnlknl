@@ -1,0 +1,45 @@
+#!/bin/bash
+
+rank=${PMI_RANK}
+size=${PMI_SIZE}
+ddd=/sdcc/u/clehner/tools/evec-compr/compress
+
+if [[ "$rank" == "" ]];
+then
+
+HOSTFILE=$(mktemp)
+~/run-knl/slurm-hostfile > $HOSTFILE
+
+date > ${ddd}/runs/logs/job.start
+mpirun -n 64 -ppn 1 -hostfile $HOSTFILE $0
+date > ${ddd}/runs/logs/job.end
+
+else
+
+x=4
+y=4
+z=3
+t=4
+nsin=100
+data=/hpcgpfs01/work/clehner/results-196/huge-data-lanc
+
+# offset by 5 seconds so that typically only two read at once
+sleep $((rank*5))
+
+for ((i=0;i<1024;i++));
+do
+
+if ((i % size == rank));
+then
+
+echo "Work on $i"
+idx=$i
+cd ${data}
+${ddd}/evc 12 12 6 12 10 $x $y $z $t 10 400 ${idx} 32 1 $nsin 0 0 > ${ddd}/runs/logs/$idx.log
+
+fi
+
+done
+
+fi
+

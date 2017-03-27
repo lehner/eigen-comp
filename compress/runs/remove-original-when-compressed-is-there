@@ -1,0 +1,30 @@
+#!/bin/bash
+dir=$1
+
+for dd in ${dir}/??
+do
+
+    for f in ${dd}/??????????.meta
+    do
+	if [ -f $f ];
+	then
+
+	    bn=$(dirname $f)/$(basename $f .meta)
+	    echo $bn
+
+	    csz=$(ls -l ${bn}.compressed | awk '{ print $5 }')
+	    
+	    if [[ "$csz" == "1504224000" ]];
+	    then
+
+		#ls -l ${bn}
+		rm -f ${bn}
+
+	    else
+		echo "Incorrect meta tagging!"
+		exit 1
+	    fi
+	fi
+    done
+
+done

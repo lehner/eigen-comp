@@ -1,0 +1,45 @@
+#!/bin/bash
+
+rank=${PMI_RANK}
+size=${PMI_SIZE}
+ddd=/sdcc/u/clehner/tools/evec-compr/decompress
+
+if [[ "$rank" == "" ]];
+then
+
+HOSTFILE=$(mktemp)
+~/run-knl/slurm-hostfile > $HOSTFILE
+
+date > ${ddd}/runs/logs/job.start
+mpirun -n 64 -ppn 1 -hostfile $HOSTFILE $0
+date > ${ddd}/runs/logs/job.end
+
+else
+
+data=/hpcgpfs01/work/clehner/results-196/huge-data-lanc
+
+sleep $((rank*2)) #offset file reads to overlap compute and reads
+
+for ((i=0;i<1024;i++));
+do
+
+if ((i % size == rank));
+then
+
+
+    
+idx=$i
+di=$(awk "BEGIN{ printf(\"%2.2d\", int($idx/32) ); }")
+ei=$(awk "BEGIN{ printf(\"%10.10d\", $idx ); }")
+cd ${data}
+fn=${data}/${di}/${ei}
+echo "Work on $i $fn"
+#ls -l ${fn}.compressed
+${ddd}/evd ${fn} > ${ddd}/runs/logs/$idx.log
+
+fi
+
+done
+
+fi
+
