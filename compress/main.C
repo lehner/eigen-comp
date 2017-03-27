@@ -218,12 +218,15 @@ T norm_of_evec(vector< vector<T> >& v, int j) {
 void write_bytes(void* buf, int64_t s, FILE* f, uint32_t& crc) {
   static double data_counter = 0.0;
 
+  if (s == 0)
+    return;
+
   // checksum
   crc = crc32_fast(buf,s,crc);
 
   double t0 = dclock();
   if (fwrite(buf,s,1,f) != 1) {
-    fprintf(stderr,"Write failed!\n");
+    fprintf(stderr,"Write failed of %g GB!\n",(double)s / 1024./1024./1024.);
     exit(2);
   }
   double t1 = dclock();
