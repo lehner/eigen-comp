@@ -53,6 +53,7 @@ char* raw_in;
 #define OPT float
 #endif
 
+vector< vector<OPT> > block_data;
 vector< vector<OPT> > block_data_ortho;
 vector< vector<OPT> > block_coef;
 
@@ -61,7 +62,7 @@ vector< vector<OPT> > block_coef;
 void fix_float_endian(float* dest, int nfloats) {
   int n_endian_test = 1;
   bool machine_is_little_endian = *(char *)&n_endian_test == 1;
-  int bigendian = 1;
+  int bigendian = 1; // write data back in big endian
 
   if ((bigendian && machine_is_little_endian) ||  // written for readability
       (!bigendian && !machine_is_little_endian)) {
@@ -128,6 +129,18 @@ void caxpy_single(T* res, complex<T> ca, T* x, T* y, int f_size) {
   complex<T>* cres = (complex<T>*)res;
   int c_size = f_size / 2;
 
+  for (int i=0;i<c_size;i++)
+    cres[i] = ca*cx[i] + cy[i];
+}    
+
+template<class T>
+void caxpy_threaded(T* res, complex<T> ca, T* x, T* y, int f_size) {
+  complex<T>* cx = (complex<T>*)x;
+  complex<T>* cy = (complex<T>*)y;
+  complex<T>* cres = (complex<T>*)res;
+  int c_size = f_size / 2;
+
+#pragma omp for
   for (int i=0;i<c_size;i++)
     cres[i] = ca*cx[i] + cy[i];
 }    
@@ -238,6 +251,8 @@ void write_floats(FILE* f, uint32_t& crc, OPT* in, int64_t n) {
   for (int64_t i=0;i<n;i++)
     buf[i] = in[i];
 
+  fix_float_endian(buf, n);
+
   write_bytes(buf,n*sizeof(float),f,crc);
 
   free(buf);
@@ -327,6 +342,7 @@ void read_floats_fp16(char* & ptr, OPT* out, int64_t n, int nsc) {
 }
 
 
+
 int read_meta(char* root, _evc_meta_& args) {
 
   char buf[1024];
@@ -339,7 +355,7 @@ int read_meta(char* root, _evc_meta_& args) {
   FILE* f = fopen(buf,"rt");
   if (!f) {
     fprintf(stderr,"Could not open %s\n",buf);
-    return 0;
+    return 3;
   }
 
   while (!feof(f)) {
@@ -365,7 +381,7 @@ int read_meta(char* root, _evc_meta_& args) {
 	    PARSE_ARRAY(nb) else
 	      {
 		fprintf(stderr,"Unknown array '%s' in %s.meta\n",buf,root);
-		return 0;
+		return 4;
 	      }
 
       } else {
@@ -388,7 +404,7 @@ int read_meta(char* root, _evc_meta_& args) {
 		    PARSE_HEX(crc32) else
 		      {
 			fprintf(stderr,"Unknown parameter '%s' in %s.meta\n",buf,root);
-			return 0;
+			return 4;
 		      }
 	
 	
@@ -406,7 +422,6 @@ int read_meta(char* root, _evc_meta_& args) {
 }
 
 int main(int argc, char* argv[]) {
-  _evc_meta_ args;
 
 #pragma omp parallel
   {
@@ -482,7 +497,7 @@ int main(int argc, char* argv[]) {
     FILE* f = fopen(buf,"r+b");
     if (!f) {
       fprintf(stderr,"Could not open %s\n",buf);
-      return 0;
+      return 3;
     }
 
     fseeko(f,0,SEEK_END);
@@ -580,6 +595,159 @@ int main(int argc, char* argv[]) {
     printf("Decompressing single/fp16 to OPT in %g seconds for evec and %g seconds for coefficients; %g GB uncompressed\n",t1-t0,t2-t1,
 	   uncomp_opt_size * sizeof(OPT) / 1024./1024./1024.);
 
+  }
+
+  {
+    char buf[1024];
+    off_t size;
+    uint32_t crc32 = 0x0;
+
+    sprintf(buf,"%s.decompressed",root);
+    FILE* f = fopen(buf,"w+b");
+    if (!f) {
+      fprintf(stderr,"Could not open %s\n",buf);
+      return 3;
+    }
+
+    // now loop through eigenvectors and decompress them
+    {
+      OPT* dest_all = (OPT*)malloc(f_size * sizeof(OPT) * args.neig);
+      if (!dest_all) {
+	fprintf(stderr,"Out of mem\n");
+	return 33;
+      }
+
+      block_data.resize(args.blocks);
+      for (int i=0;i<args.blocks;i++)
+	block_data[i].resize(f_size_block);    
+
+      double t0 = dclock();
+#pragma omp parallel
+      {
+	for (int j=0;j<args.neig;j++) {
+
+	  OPT* dest = &dest_all[ (int64_t)f_size * j ];
+
+	  double ta,tb;
+	  int tid = omp_get_thread_num();
+
+	  if (!tid)
+	    ta = dclock();
+
+#if 1
+
+#pragma omp for
+	  for (int nb=0;nb<args.blocks;nb++) {
+	    
+	    OPT* dest_block = &block_data[nb][0];
+
+#if 1
+	    {
+	      // do reconstruction of this block
+	      memset(dest_block,0,sizeof(OPT)*f_size_block);
+	      for (int i=0;i<args.nkeep;i++) {
+		OPT* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
+		OPT* coef = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+		caxpy_single(dest_block, *(complex<OPT>*)coef, ev_i, dest_block, f_size_block);
+	      }
+	    }
+#else
+	    {
+	      complex<OPT>* res = (complex<OPT>*)dest_block;
+	      for (int l=0;l<f_size_block/2;l++) {
+		complex<OPT> r = 0.0;
+		for (int i=0;i<args.nkeep;i++) {
+		  complex<OPT>* ev_i = (complex<OPT>*)&block_data_ortho[nb][ (int64_t)f_size_block * i ];
+		  complex<OPT>* coef = (complex<OPT>*)&block_coef[nb][ 2*( i + args.nkeep*j ) ];
+		  r += coef[i] * ev_i[l];
+		}
+		res[l] = r;
+	      }
+	    }
+#endif
+	  }
+#else
+
+	  for (int nb=0;nb<args.blocks;nb++) {
+	    
+	    OPT* dest_block = &block_data[nb][0];
+	    // do reconstruction of this block
+#pragma omp for
+	    for (int ll=0;ll<f_size_block;ll++)
+	      dest_block[ll] = 0;
+
+	    for (int i=0;i<args.nkeep;i++) {
+	      OPT* ev_i = &block_data_ortho[nb][ (int64_t)f_size_block * i ];
+	      OPT* coef = &block_coef[nb][ 2*( i + args.nkeep*j ) ];
+	      caxpy_threaded(dest_block, *(complex<OPT>*)coef, ev_i, dest_block, f_size_block);
+	    }
+	  }
+
+
+
+#endif
+	  if (!tid) {
+	    tb = dclock();
+	    printf("%d - %g seconds\n",j,tb-ta);
+	  }
+	  
+#pragma omp for
+	  for (int idx=0;idx<vol4d;idx++) {
+	    int pos[5], pos_in_block[5], block_coor[5];
+	    index_to_pos(idx,pos,args.s);
+	    
+	    int parity = (pos[0] + pos[1] + pos[2] + pos[3]) % 2;
+	    if (parity == 1) {
+	      
+	      for (pos[4]=0;pos[4]<args.s[4];pos[4]++) {
+		pos_to_blocked_pos(pos,pos_in_block,block_coor);
+		
+		int bid = pos_to_index(block_coor, args.nb);
+		int ii = pos_to_index(pos_in_block, args.b) / 2;
+		OPT* dst = &block_data[bid][ii*24];
+		
+		int co;
+		for (co=0;co<12;co++) {
+		  OPT* out=&dest[ get_bfm_index(pos,co) ];
+		  out[0] = dst[2*co + 0];
+		  out[1] = dst[2*co + 1];
+		}
+	      }
+	    }
+	  }
+	}
+      }
+
+      double t1 = dclock();
+
+      printf("Reconstruct eigenvectors in %g seconds\n",t1-t0);
+
+      {
+	int i;
+	for (i=0;i<args.neig;i++)
+	  write_floats(f, crc32, &dest_all[ (int64_t)f_size * i ], f_size);
+      }
+
+      double t2 = dclock();
+
+      printf("Wrote data in %g seconds\n",t2-t1);
+      
+      free(dest_all);
+    }
+
+    fclose(f);
+
+    // now write crc32
+    sprintf(buf,"%s.decompressed.crc32",root);
+    f = fopen(buf,"wt");
+    if (!f) {
+      fprintf(stderr,"Could not open %s\n",buf);
+      return 3;
+    }
+
+    fprintf(f,"%X\n",crc32);
+
+    fclose(f);
   }
 
   free(raw_in);
