@@ -688,7 +688,8 @@ int main(int argc, char* argv[]) {
 #endif
 	  if (!tid) {
 	    tb = dclock();
-	    printf("%d - %g seconds\n",j,tb-ta);
+	    if (j % 100 == 0)
+	      printf("%d - %g seconds\n",j,tb-ta);
 	  }
 	  
 #pragma omp for
