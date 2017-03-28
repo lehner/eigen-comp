@@ -1,0 +1,2 @@
+#!/bin/bash
+qsub -t 60 -n 1 --mode script /home/lehner/eigen-comp/compress/runs/run-production-cooley-48I
