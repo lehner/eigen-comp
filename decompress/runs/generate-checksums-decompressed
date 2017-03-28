@@ -1,0 +1,22 @@
+#!/bin/bash
+
+data=/hpcgpfs01/work/clehner/results-196/huge-data-lanc
+
+(
+head -n 2 ${data}/checksums.txt
+
+for ((i=0;i<1024;i++));
+do
+
+idx=$i
+di=$(awk "BEGIN{ printf(\"%2.2d\", int($idx/32) ); }")
+ei=$(awk "BEGIN{ printf(\"%10.10d\", $idx ); }")
+cd ${data}
+fn=${data}/${di}/${ei}
+#echo "Work on $i $fn"
+cat ${fn}.decompressed.crc32
+
+
+done
+) > ${data}/checksums.txt.decompressed
+
