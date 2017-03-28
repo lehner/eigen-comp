@@ -47,6 +47,29 @@ plot\
  'compare.4.4.3.4.100.dat' using 1:(\$2/\$3) title "48^3, 4.4.3.4 - nsingle_prec = 100; 15%", \
  'compare.4.4.3.4.0.dat' using 1:(\$2/\$3) title "48^3, 4.4.3.4 - nsingle_prec = 0; 12%"
 
+set title "Effect on CG convergence on 48^3 ensemble 980"
+plot\
+ 'res-48c-test/77-cg.dat' title "Original", \
+ 'res-48c-test/99-cg.dat' title "Compressed"
+
+unset logscale y
+set xrange [-0.5:35.5]
+
+set title "Effect on low-mode approximation for single point source C(t) t^4 on 48^3 ensemble 980"
+plot\
+ 'res-48c-test/77-l.dat' using 1:(\$2*\$1**4) title "Original", \
+ 'res-48c-test/99-l.dat' using 1:(\$2*\$1**4) title "Compressed"
+
+set title "Effect on sloppy solve for single point source C(t) t^4 on 48^3 ensemble 980"
+plot\
+ 'res-48c-test/77-sl.dat' using 1:(\$2*\$1**4) title "Original", \
+ 'res-48c-test/99-sl.dat' using 1:(\$2*\$1**4) title "Compressed"
+
+set title "Effect on full low-mode reconstruction C(t) t^4 on 48^3 ensemble 980"
+plot\
+ 'res-48c-test/77-g0g0-low3.dat' using 1:(\$2*\$1**4) title "Original", \
+ 'res-48c-test/99-g0g0-low3.dat' using 1:(\$2*\$1**4) title "Compressed"
+
 EOF
 
 ps2pdf plots.ps
