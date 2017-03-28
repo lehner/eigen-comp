@@ -59,10 +59,10 @@ set xrange [-0.5:35.5]
 set yrange [*:*]
 set title "Effect on single point source C(t) t^4 on 48^3 ensemble 980"
 plot\
- 'res-48c-test/77-l.dat' using 1:(\$2*\$1**4) title "Original low-appx", \
- 'res-48c-test/99-l.dat' using 1:(\$2*\$1**4) title "Compressed low-appx" lt 3, \
- 'res-48c-test/77-sl.dat' using 1:(\$2*\$1**4) title "Original sloppy", \
- 'res-48c-test/99-sl.dat' using 1:(\$2*\$1**4) title "Compressed sloppy"
+ 'res-48c-test/77-l.dat' using 1:(\$2*\$1**4) title "Original low-appx" lt 1, \
+ 'res-48c-test/99-l.dat' using 1:(\$2*\$1**4) title "Compressed low-appx" lt 5, \
+ 'res-48c-test/77-sl.dat' using 1:(\$2*\$1**4) title "Original sloppy" lt 4, \
+ 'res-48c-test/99-sl.dat' using 1:(\$2*\$1**4) title "Compressed sloppy" lt 3
 
 set title "Effect on full low-mode reconstruction C(t) t^4 on 48^3 ensemble 980"
 plot\
