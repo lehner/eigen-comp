@@ -1,0 +1,46 @@
+#!/bin/bash
+
+grep ressqr log-4.4.3.4 > ressqr-4.4.3.4
+grep ressqr log-3.3.3.3 > ressqr-3.3.3.3
+grep ressqr log-2.2.3.2 > ressqr-2.2.3.2
+
+grep "nkeep_residuum" log64-4.4.4.4 > res64-4.4.4.4
+grep "evec_residuum" log64-4.4.4.4 > ressqr64-4.4.4.4
+
+#cat compare.4.4.3.4.100 | awk '{ if (NF>2) { print $2, $10, substr($5,3)+0.0 } }' > compare.4.4.3.4.100.dat
+#cat compare.4.4.3.4.0 | awk '{ if (NF>2) { print $2, $10, substr($5,3)+0.0 } }' > compare.4.4.3.4.0.dat
+
+
+tail -n +2 /hpcgpfs01/work/clehner/results-196/huge-data-lanc/eigen-values.txt > ev.dat
+
+gnuplot<<EOF
+
+set terminal postscript color enhanced
+set output 'plots.ps'
+
+set logscale y
+
+
+
+set yrange [*:1]
+plot 'res-4.4.3.4' using 2:4, \
+'res-3.3.3.3' using 2:4,\
+'res-2.2.3.2' using 2:4,\
+'res-3.3.3.3-567' using 2:4, \
+'res64-4.4.4.4' using 2:4
+
+plot 'ressqr-4.4.3.4' using 2:5, \
+'ressqr-3.3.3.3' using 2:5,\
+'ressqr-2.2.3.2' using 2:5,\
+'ressqr64-4.4.4.4' using 2:4
+
+plot 'ev.dat'
+
+set yrange [1e-16:1]
+plot\
+ 'compare.4.4.3.4.100.dat' using 1:(\$2/\$3) title "4.4.3.4 - nSP = 100; 15%", \
+ 'compare.4.4.3.4.0.dat' using 1:(\$2/\$3) title "4.4.3.4 - nSP = 0; 12%"
+
+EOF
+
+ps2pdf plots.ps
