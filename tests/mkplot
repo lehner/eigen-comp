@@ -1,17 +1,17 @@
 #!/bin/bash
 
-grep ressqr log-4.4.3.4 > ressqr-4.4.3.4
-grep ressqr log-3.3.3.3 > ressqr-3.3.3.3
-grep ressqr log-2.2.3.2 > ressqr-2.2.3.2
+#grep ressqr log-4.4.3.4 > ressqr-4.4.3.4
+#grep ressqr log-3.3.3.3 > ressqr-3.3.3.3
+#grep ressqr log-2.2.3.2 > ressqr-2.2.3.2
 
-grep "nkeep_residuum" log64-4.4.4.4 > res64-4.4.4.4
-grep "evec_residuum" log64-4.4.4.4 > ressqr64-4.4.4.4
+#grep "nkeep_residuum" log64-4.4.4.4 > res64-4.4.4.4
+#grep "evec_residuum" log64-4.4.4.4 > ressqr64-4.4.4.4
 
 #cat compare.4.4.3.4.100 | awk '{ if (NF>2) { print $2, $10, substr($5,3)+0.0 } }' > compare.4.4.3.4.100.dat
 #cat compare.4.4.3.4.0 | awk '{ if (NF>2) { print $2, $10, substr($5,3)+0.0 } }' > compare.4.4.3.4.0.dat
 
 
-tail -n +2 /hpcgpfs01/work/clehner/results-196/huge-data-lanc/eigen-values.txt > ev.dat
+#tail -n +2 /hpcgpfs01/work/clehner/results-196/huge-data-lanc/eigen-values.txt > ev.dat
 
 gnuplot<<EOF
 
@@ -23,23 +23,29 @@ set logscale y
 
 
 set yrange [*:1]
-plot 'res-4.4.3.4' using 2:4, \
-'res-3.3.3.3' using 2:4,\
-'res-2.2.3.2' using 2:4,\
-'res-3.3.3.3-567' using 2:4, \
-'res64-4.4.4.4' using 2:4
+set title "Residuum^2 of evec n+1 when reconstructed from blocked 1..n"
+set xlabel "n"
 
-plot 'ressqr-4.4.3.4' using 2:5, \
-'ressqr-3.3.3.3' using 2:5,\
-'ressqr-2.2.3.2' using 2:5,\
-'ressqr64-4.4.4.4' using 2:4
+plot 'res-4.4.3.4' using 2:4 title "48^3, 4.4.3.4 block", \
+'res-3.3.3.3' using 2:4 title "48^3, 3.3.3.3 block",\
+'res-2.2.3.2' using 2:4 title "48^3, 2.2.3.2 block",\
+'res-3.3.3.3-567' using 2:4  title "48^3, 3.3.3.3 block alt.config", \
+'res64-4.4.4.4' using 2:4  title "64^3, 4.4.4.4 block"
 
+set title "Residuum^2 of evec n when reconstructed from blocked 1..400"
+plot 'ressqr-4.4.3.4' using 2:5  title "48^3, 4.4.3.4 block", \
+'ressqr-3.3.3.3' using 2:5  title "48^3, 3.3.3.3 block",\
+'ressqr-2.2.3.2' using 2:5  title "48^3, 2.2.3.2 block",\
+'ressqr64-4.4.4.4' using 2:4 title "64^3, 4.4.4.4 block"
+
+set title "48^3 eigenvalue distribution"
 plot 'ev.dat'
 
+set title "Norm of difference / norm of eigenvector (original - compressed)"
 set yrange [1e-16:1]
 plot\
- 'compare.4.4.3.4.100.dat' using 1:(\$2/\$3) title "4.4.3.4 - nSP = 100; 15%", \
- 'compare.4.4.3.4.0.dat' using 1:(\$2/\$3) title "4.4.3.4 - nSP = 0; 12%"
+ 'compare.4.4.3.4.100.dat' using 1:(\$2/\$3) title "48^3, 4.4.3.4 - nsingle_prec = 100; 15%", \
+ 'compare.4.4.3.4.0.dat' using 1:(\$2/\$3) title "48^3, 4.4.3.4 - nsingle_prec = 0; 12%"
 
 EOF
 
