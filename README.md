@@ -17,6 +17,6 @@ Combining these ideas achieves a 85% reduction in size for RBC/UKQCD's 48^3 eige
 in size for RBC/UKQCD's 64^3 eigenvectors.
 
 # Contributors
-Chulwoo Jung
-Christoph Lehner
+* Chulwoo Jung
+* Christoph Lehner
 
