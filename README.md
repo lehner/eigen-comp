@@ -14,7 +14,8 @@ It achieves substantial compression by combining three ideas:
   in the original single precision and use fixed precision for the bulk of the data.
   
 Combining these ideas achieves a 85% reduction in size for RBC/UKQCD's 48^3 eigenvectors and 92% reduction
-in size for RBC/UKQCD's 64^3 eigenvectors.
+in size for RBC/UKQCD's 64^3 eigenvectors with acceptable precision for both CG and exact all-to-all low-mode
+reconstruction.
 
 # Contributors
 * Chulwoo Jung
