@@ -9,7 +9,7 @@ nsin=$6
 
 make -f Makefile.haswell && (
 ddd=$(pwd); 
-cd /projects/HadronicLight_2/clehner/test-jobs/evec-comp
+cd /projects/HadronicLight_2/clehner/evec-cache/results-196/huge-data-lanc
 ${ddd}/evc 12 12 6 12 10 $x $y $z $t 10 400 ${idx} 32 1 $nsin 2 20
 cd -
 )
