@@ -289,24 +289,10 @@ float unmap_fp16_exp(unsigned short e) {
 unsigned short map_fp16_exp(float v) {
   // float has exponents 10^{-44.85} .. 10^{38.53}
   int exp = (int)ceil(log(v) / log(BASE)) + SHRT_UMAX / 2;
-
-  // due to numerical inaccuracies we may need to increase
-  // exp to satisfy our constraint
-  do {
-    
-    if (exp < 0 || exp > SHRT_UMAX) {
-      fprintf(stderr,"Error in map_fp16_exp(%g,%d)\n",v,exp);
-      exit(3);
-    }
-
-    if (unmap_fp16_exp(exp)>=v)
-      break;
-
-    exp++;
-
-    fprintf(stderr,"Needed to increase exponential due to numerical inaccuracies %g -> %d\n",v,exp);
-
-  } while(1);
+  if (exp < 0 || exp > SHRT_UMAX) {
+    fprintf(stderr,"Error in map_fp16_exp(%g,%d)\n",v,exp);
+    exit(3);
+  }
 
   return (unsigned short)exp;
 }
@@ -337,7 +323,7 @@ void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
     OPT min;
 
     for (int i=0;i<nsc;i++) {
-      if (ev[i]*ev[i] > max*max)
+      if (fabs(ev[i]) > max)
 	max = fabs(ev[i]);
     }
 
