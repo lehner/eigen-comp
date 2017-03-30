@@ -437,7 +437,7 @@ int main(int argc, char* argv[]) {
     // read slot
     char buf[1024];
     sprintf(buf,"%2.2d/%10.10d",args.findex / args.filesperdir,args.findex);
-    FILE* f = fopen(buf,"r+b");
+    FILE* f = fopen(buf,"rb");
     if (!f) {
       fprintf(stderr,"Could not open %s\n",buf);
       return 1;
