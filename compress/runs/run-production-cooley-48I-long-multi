@@ -5,6 +5,14 @@
 N=64 # needs 4 hours
 
 rank=${PMI_RANK}
+size=${PMI_SIZE}
+
+if [[ "$rank" == "" ]];
+then
+mpirun $0
+else
+
+
 sleep $((rank*5))
 
 source /soft/compilers/intel/bin/compilervars.sh --arch intel64
@@ -25,8 +33,34 @@ do
     if [ ! -f $results/compression-complete ];
     then
 
-	runLayout=$(head -n 1000 /home/ljin/application/Public/Muon-GM2-cc/jobs/48I/runs/3/$(basename $results)/*.output | 
-	grep "Physical XxY" | awk '{ print $5 }' | awk 'BEGIN{ FS="x" }{ print 48/$1 " " 48/$2 " " 48/$3 " " 96/$4 }')
+	A=/home/ljin/application/Public/Muon-GM2-cc/jobs/48I/runs/3/$(basename $results)/*.output
+	B=/projects/HadronicLight_2/chulwoo/48I/$(basename $results)/*.output
+	C=/projects/HadronicLight_2/chulwoo/48I/$(basename $results)/log
+	D=/home/ljin/application/Public/Muon-GM2-cc/jobs/48I/runs/3/$(basename $results)/log
+	
+	if [ -f $B ];
+	then
+            logf=$B
+	elif [ -f $A ];
+	then
+            logf=$A
+	elif [ -f $C ];
+	then
+            logf=$C
+	elif [ -f $D ];
+	then
+            logf=$D
+	else
+            logf=""
+	fi
+	
+	if [[ "$logf" != "" ]];
+	then
+            runLayout=$(head -n 1000 $logf |
+		grep "Physical XxY" | awk '{ print $5 }' | awk 'BEGIN{ FS="x" }{ print 48/$1 " " 48/$2 " " 48/$3 " " 96/$4 }')
+	else
+	    runLayout=""
+	fi
 
 	if [[ "$runLayout" != "12 12 6 12" ]];
 	then
@@ -44,7 +78,7 @@ do
 
 		if [ -f $fn ];
 		then
-		    sz=$(ls -l $fn | awk '{ print $5/9953280000 }')
+		    sz=$(ls -Hl $fn | awk '{ print $5/9953280000 }')
 		else
 		    sz=0
 		fi
@@ -85,4 +119,5 @@ do
     fi
 done
 
+fi
 
