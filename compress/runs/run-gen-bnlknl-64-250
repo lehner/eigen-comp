@@ -1,0 +1,16 @@
+#!/bin/bash
+x=$1
+y=$2
+z=$3
+t=$4
+
+idx=$5
+nsin=$6
+
+make -f Makefile.knl && (
+ddd=$(pwd); 
+cd /hpcgpfs01/work/clehner/misc/64I_evec_zmobius_test
+${ddd}/evc 16 8 4 8 12 $x $y $z $t 12 250 ${idx} 128 1 $nsin 2 20
+cd -
+)
+

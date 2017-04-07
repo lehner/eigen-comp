@@ -38,8 +38,9 @@ plot 'ressqr-4.4.3.4' using 2:5  title "48^3, 4.4.3.4 block", \
 'ressqr-2.2.3.2' using 2:5  title "48^3, 2.2.3.2 block",\
 'ressqr64-4.4.4.4' using 2:4 title "64^3, 4.4.4.4 block"
 
-set title "48^3 eigenvalue distribution"
-plot 'ev.dat' notitle
+set title "Eigenvalue distribution"
+plot 'ev.dat' title "48I",\
+'ev64.dat' title "64I" 
 
 set title "Norm of difference / norm of eigenvector (original - compressed)"
 set yrange [1e-16:1]
