@@ -278,11 +278,16 @@ float fp_unmap(int val, float min, float max, int N) {
 }
 
 #define SHRT_UMAX 65535
+#define BASE 1.4142135623730950488
+
+float unmap_fp16_exp(unsigned short e) {
+  float de = (float)((int)e - SHRT_UMAX / 2);
+  return pow( BASE, de );
+}
 
 // can assume that v >=0 and need to guarantee that unmap_fp16_exp(map_fp16_exp(v)) >= v
 unsigned short map_fp16_exp(float v) {
   // float has exponents 10^{-44.85} .. 10^{38.53}
-#define BASE 1.4142135623730950488
   int exp = (int)ceil(log(v) / log(BASE)) + SHRT_UMAX / 2;
   if (exp < 0 || exp > SHRT_UMAX) {
     fprintf(stderr,"Error in map_fp16_exp(%g,%d)\n",v,exp);
@@ -290,11 +295,6 @@ unsigned short map_fp16_exp(float v) {
   }
 
   return (unsigned short)exp;
-}
-
-float unmap_fp16_exp(unsigned short e) {
-  float de = (float)((int)e - SHRT_UMAX / 2);
-  return pow( BASE, de );
 }
 
 void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
@@ -323,7 +323,7 @@ void write_floats_fp16(FILE* f, uint32_t& crc, OPT* in, int64_t n, int nsc) {
     OPT min;
 
     for (int i=0;i<nsc;i++) {
-      if (ev[i]*ev[i] > max*max)
+      if (fabs(ev[i]) > max)
 	max = fabs(ev[i]);
     }
 
@@ -437,7 +437,7 @@ int main(int argc, char* argv[]) {
     // read slot
     char buf[1024];
     sprintf(buf,"%2.2d/%10.10d",args.findex / args.filesperdir,args.findex);
-    FILE* f = fopen(buf,"r+b");
+    FILE* f = fopen(buf,"rb");
     if (!f) {
       fprintf(stderr,"Could not open %s\n",buf);
       return 1;

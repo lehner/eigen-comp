@@ -289,19 +289,7 @@ float fp_unmap(int val, float min, float max, int N) {
 }
 
 #define SHRT_UMAX 65535
-
-// can assume that v >=0 and need to guarantee that unmap_fp16_exp(map_fp16_exp(v)) >= v
-unsigned short map_fp16_exp(float v) {
-  // float has exponents 10^{-44.85} .. 10^{38.53}
 #define BASE 1.4142135623730950488
-  int exp = (int)ceil(log(v) / log(BASE)) + SHRT_UMAX / 2;
-  if (exp < 0 || exp > SHRT_UMAX) {
-    fprintf(stderr,"Error in map_fp16_exp(%g,%d)\n",v,exp);
-    exit(3);
-  }
-
-  return (unsigned short)exp;
-}
 
 float unmap_fp16_exp(unsigned short e) {
   float de = (float)((int)e - SHRT_UMAX / 2);
